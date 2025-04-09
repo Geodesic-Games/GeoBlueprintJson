@@ -1,0 +1,24 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0",
+    "FriendlyName": "Geo Blueprint JSON",
+    "Description": "A plugin that provides Blueprint functions for JSON conversion",
+    "Category": "Blueprint",
+    "CreatedBy": "Geo",
+    "CreatedByURL": "",
+    "DocsURL": "",
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "CanContainContent": true,
+    "IsBetaVersion": false,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "GeoBlueprintJson",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        }
+    ]
+} 
