@@ -248,14 +248,20 @@ FString UGeoBlueprintJsonFunctionLibrary::ConvertBlueprintGraphToJson(UBlueprint
         return TEXT("");
     }
 
-    TSharedPtr<FJsonObject> GraphJson = MakeShared<FJsonObject>();
-    TArray<TSharedPtr<FJsonValue>> NodesArray;
+    TSharedPtr<FJsonObject> BlueprintJson = MakeShared<FJsonObject>();
+    
+    // Add basic Blueprint information
+    BlueprintJson->SetStringField(TEXT("BlueprintName"), Blueprint->GetName());
+    BlueprintJson->SetStringField(TEXT("BlueprintClass"), Blueprint->GetClass()->GetName());
+    BlueprintJson->SetStringField(TEXT("ParentClass"), Blueprint->ParentClass ? Blueprint->ParentClass->GetName() : TEXT("None"));
 
-    // Convert all graphs in the Blueprint
+    // Convert Event Graph
+    TArray<TSharedPtr<FJsonValue>> EventGraphNodesArray;
     for (UEdGraph* Graph : Blueprint->UbergraphPages)
     {
         TSharedPtr<FJsonObject> GraphObject = MakeShared<FJsonObject>();
         GraphObject->SetStringField(TEXT("GraphName"), Graph->GetName());
+        GraphObject->SetStringField(TEXT("GraphType"), TEXT("EventGraph"));
         
         TArray<TSharedPtr<FJsonValue>> GraphNodesArray;
         for (UEdGraphNode* Node : Graph->Nodes)
@@ -268,14 +274,82 @@ FString UGeoBlueprintJsonFunctionLibrary::ConvertBlueprintGraphToJson(UBlueprint
         }
         
         GraphObject->SetArrayField(TEXT("Nodes"), GraphNodesArray);
-        NodesArray.Add(MakeShared<FJsonValueObject>(GraphObject));
+        EventGraphNodesArray.Add(MakeShared<FJsonValueObject>(GraphObject));
     }
+    BlueprintJson->SetArrayField(TEXT("EventGraphs"), EventGraphNodesArray);
 
-    GraphJson->SetArrayField(TEXT("Graphs"), NodesArray);
+    // Convert Function Graphs
+    TArray<TSharedPtr<FJsonValue>> FunctionGraphsArray;
+    for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+    {
+        TSharedPtr<FJsonObject> GraphObject = MakeShared<FJsonObject>();
+        GraphObject->SetStringField(TEXT("GraphName"), Graph->GetName());
+        GraphObject->SetStringField(TEXT("GraphType"), TEXT("FunctionGraph"));
+        
+        TArray<TSharedPtr<FJsonValue>> GraphNodesArray;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            TSharedPtr<FJsonObject> NodeObject = ConvertNodeToJsonObject(Node);
+            if (NodeObject.IsValid())
+            {
+                GraphNodesArray.Add(MakeShared<FJsonValueObject>(NodeObject));
+            }
+        }
+        
+        GraphObject->SetArrayField(TEXT("Nodes"), GraphNodesArray);
+        FunctionGraphsArray.Add(MakeShared<FJsonValueObject>(GraphObject));
+    }
+    BlueprintJson->SetArrayField(TEXT("FunctionGraphs"), FunctionGraphsArray);
+
+    // Convert Macro Graphs
+    TArray<TSharedPtr<FJsonValue>> MacroGraphsArray;
+    for (UEdGraph* Graph : Blueprint->MacroGraphs)
+    {
+        TSharedPtr<FJsonObject> GraphObject = MakeShared<FJsonObject>();
+        GraphObject->SetStringField(TEXT("GraphName"), Graph->GetName());
+        GraphObject->SetStringField(TEXT("GraphType"), TEXT("MacroGraph"));
+        
+        TArray<TSharedPtr<FJsonValue>> GraphNodesArray;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            TSharedPtr<FJsonObject> NodeObject = ConvertNodeToJsonObject(Node);
+            if (NodeObject.IsValid())
+            {
+                GraphNodesArray.Add(MakeShared<FJsonValueObject>(NodeObject));
+            }
+        }
+        
+        GraphObject->SetArrayField(TEXT("Nodes"), GraphNodesArray);
+        MacroGraphsArray.Add(MakeShared<FJsonValueObject>(GraphObject));
+    }
+    BlueprintJson->SetArrayField(TEXT("MacroGraphs"), MacroGraphsArray);
+
+    // Convert Delegate Graphs
+    TArray<TSharedPtr<FJsonValue>> DelegateGraphsArray;
+    for (UEdGraph* Graph : Blueprint->DelegateSignatureGraphs)
+    {
+        TSharedPtr<FJsonObject> GraphObject = MakeShared<FJsonObject>();
+        GraphObject->SetStringField(TEXT("GraphName"), Graph->GetName());
+        GraphObject->SetStringField(TEXT("GraphType"), TEXT("DelegateGraph"));
+        
+        TArray<TSharedPtr<FJsonValue>> GraphNodesArray;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            TSharedPtr<FJsonObject> NodeObject = ConvertNodeToJsonObject(Node);
+            if (NodeObject.IsValid())
+            {
+                GraphNodesArray.Add(MakeShared<FJsonValueObject>(NodeObject));
+            }
+        }
+        
+        GraphObject->SetArrayField(TEXT("Nodes"), GraphNodesArray);
+        DelegateGraphsArray.Add(MakeShared<FJsonValueObject>(GraphObject));
+    }
+    BlueprintJson->SetArrayField(TEXT("DelegateGraphs"), DelegateGraphsArray);
 
     FString OutputString;
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
-    FJsonSerializer::Serialize(GraphJson.ToSharedRef(), Writer);
+    FJsonSerializer::Serialize(BlueprintJson.ToSharedRef(), Writer);
     return OutputString;
 }
 
@@ -682,4 +756,23 @@ TSharedPtr<FJsonObject> UGeoBlueprintJsonFunctionLibrary::ConvertConnectionToJso
     ConnectionObject->SetStringField(TEXT("PinType"), Pin->PinType.PinCategory.ToString());
 
     return ConnectionObject;
+}
+
+bool UGeoBlueprintJsonFunctionLibrary::ExportJsonToFile(const FString& JsonString, const FString& FilePath)
+{
+    if (JsonString.IsEmpty() || FilePath.IsEmpty())
+    {
+        return false;
+    }
+
+    // Ensure the directory exists
+    FString Directory = FPaths::GetPath(FilePath);
+    if (!FPaths::DirectoryExists(Directory))
+    {
+        IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+        PlatformFile.CreateDirectoryTree(*Directory);
+    }
+
+    // Write the JSON string to file
+    return FFileHelper::SaveStringToFile(JsonString, *FilePath, FFileHelper::EEncodingOptions::AutoDetect, &IFileManager::Get(), FILEWRITE_None);
 } 
