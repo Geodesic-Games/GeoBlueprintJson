@@ -17,6 +17,19 @@
 #include "K2Node_IfThenElse.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_Select.h"
+#include "K2Node_DynamicCast.h"
+#include "K2Node_MacroInstance.h"
+#include "K2Node_Timeline.h"
+#include "K2Node_SpawnActor.h"
+#include "K2Node_VariableGet.h"
+#include "K2Node_VariableSet.h"
+#include "K2Node_Knot.h"
+#include "K2Node_Switch.h"
+#include "K2Node_CommutativeAssociativeBinaryOperator.h"
+#include "K2Node_MakeArray.h"
+#include "K2Node_MakeStruct.h"
+#include "K2Node_BreakStruct.h"
+#include "K2Node_CallParentFunction.h"
 #include "Blueprint/BlueprintSupport.h"
 #include "Engine/Blueprint.h"
 
@@ -316,8 +329,12 @@ TSharedPtr<FJsonObject> UGeoBlueprintJsonFunctionLibrary::ConvertNodeToJsonObjec
     // Basic node information
     NodeObject->SetStringField(TEXT("NodeName"), Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
     NodeObject->SetStringField(TEXT("NodeType"), Node->GetClass()->GetName());
+    NodeObject->SetStringField(TEXT("NodeGuid"), Node->NodeGuid.ToString());
     NodeObject->SetNumberField(TEXT("NodeX"), Node->NodePosX);
     NodeObject->SetNumberField(TEXT("NodeY"), Node->NodePosY);
+    NodeObject->SetStringField(TEXT("NodeComment"), Node->NodeComment);
+    NodeObject->SetBoolField(TEXT("AdvancedPinDisplay"), static_cast<bool>(Node->AdvancedPinDisplay));
+    NodeObject->SetBoolField(TEXT("EnabledState"), Node->IsNodeEnabled());
 
     // Convert input pins
     TArray<TSharedPtr<FJsonValue>> InputPinsArray;
@@ -363,22 +380,115 @@ TSharedPtr<FJsonObject> UGeoBlueprintJsonFunctionLibrary::ConvertNodeToJsonObjec
             if (UFunction* Function = FunctionNode->GetTargetFunction())
             {
                 NodeObject->SetStringField(TEXT("FunctionSignature"), Function->GetName());
+                NodeObject->SetBoolField(TEXT("IsPureFunc"), Function->HasAnyFunctionFlags(FUNC_BlueprintPure));
             }
         }
     }
-    else if (Node->IsA<UK2Node_Variable>())
+    else if (Node->IsA<UK2Node_DynamicCast>())
     {
-        if (UK2Node_Variable* VariableNode = Cast<UK2Node_Variable>(Node))
+        if (UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
         {
-            if (VariableNode->VariableReference.GetMemberParentClass())
+            if (UClass* TargetType = CastNode->TargetType)
             {
-                NodeObject->SetStringField(TEXT("VariableClass"), VariableNode->VariableReference.GetMemberParentClass()->GetName());
+                NodeObject->SetStringField(TEXT("CastToType"), TargetType->GetName());
             }
-            NodeObject->SetStringField(TEXT("VariableName"), VariableNode->VariableReference.GetMemberName().ToString());
-            
-            if (FProperty* Property = VariableNode->GetPropertyForVariable())
+            NodeObject->SetBoolField(TEXT("IsPureCast"), CastNode->IsNodePure());
+        }
+    }
+    else if (Node->IsA<UK2Node_MacroInstance>())
+    {
+        if (UK2Node_MacroInstance* MacroNode = Cast<UK2Node_MacroInstance>(Node))
+        {
+            if (UBlueprint* MacroBlueprint = MacroNode->GetMacroGraph()->GetTypedOuter<UBlueprint>())
             {
-                NodeObject->SetStringField(TEXT("VariableType"), Property->GetClass()->GetName());
+                NodeObject->SetStringField(TEXT("MacroName"), MacroBlueprint->GetName());
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_Timeline>())
+    {
+        if (UK2Node_Timeline* TimelineNode = Cast<UK2Node_Timeline>(Node))
+        {
+            NodeObject->SetStringField(TEXT("TimelineName"), TimelineNode->TimelineName.ToString());
+        }
+    }
+    else if (Node->IsA<UK2Node_SpawnActor>())
+    {
+        if (UK2Node_SpawnActor* SpawnNode = Cast<UK2Node_SpawnActor>(Node))
+        {
+            // Use public API to get spawn class
+            UClass* ClassToSpawn = nullptr;
+            for (UEdGraphPin* Pin : SpawnNode->Pins)
+            {
+                if (Pin && Pin->PinName == TEXT("Class"))
+                {
+                    if (Pin->DefaultObject)
+                    {
+                        ClassToSpawn = Cast<UClass>(Pin->DefaultObject);
+                        break;
+                    }
+                }
+            }
+            if (ClassToSpawn)
+            {
+                NodeObject->SetStringField(TEXT("ActorToSpawn"), ClassToSpawn->GetName());
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_VariableGet>())
+    {
+        if (UK2Node_VariableGet* GetNode = Cast<UK2Node_VariableGet>(Node))
+        {
+            NodeObject->SetStringField(TEXT("VariableName"), GetNode->VariableReference.GetMemberName().ToString());
+            if (GetNode->VariableReference.GetMemberParentClass())
+            {
+                NodeObject->SetStringField(TEXT("VariableClass"), GetNode->VariableReference.GetMemberParentClass()->GetName());
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_VariableSet>())
+    {
+        if (UK2Node_VariableSet* SetNode = Cast<UK2Node_VariableSet>(Node))
+        {
+            NodeObject->SetStringField(TEXT("VariableName"), SetNode->VariableReference.GetMemberName().ToString());
+            if (SetNode->VariableReference.GetMemberParentClass())
+            {
+                NodeObject->SetStringField(TEXT("VariableClass"), SetNode->VariableReference.GetMemberParentClass()->GetName());
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_Knot>())
+    {
+        if (UK2Node_Knot* KnotNode = Cast<UK2Node_Knot>(Node))
+        {
+            // Knot nodes are simple pass-through nodes, just add their basic info
+            NodeObject->SetBoolField(TEXT("IsKnot"), true);
+        }
+    }
+    else if (Node->IsA<UK2Node_Switch>())
+    {
+        if (UK2Node_Switch* SwitchNode = Cast<UK2Node_Switch>(Node))
+        {
+            // Add switch-specific properties
+            TArray<TSharedPtr<FJsonValue>> CasePinsArray;
+            for (UEdGraphPin* Pin : SwitchNode->Pins)
+            {
+                if (Pin && Pin->Direction == EGPD_Output && !Pin->PinName.ToString().Contains(TEXT("Default")))
+                {
+                    CasePinsArray.Add(MakeShared<FJsonValueString>(Pin->PinName.ToString()));
+                }
+            }
+            NodeObject->SetArrayField(TEXT("CasePins"), CasePinsArray);
+        }
+    }
+    else if (Node->IsA<UK2Node_CommutativeAssociativeBinaryOperator>())
+    {
+        if (UK2Node_CommutativeAssociativeBinaryOperator* OpNode = Cast<UK2Node_CommutativeAssociativeBinaryOperator>(Node))
+        {
+            // Add operator-specific properties
+            if (UFunction* OperatorFunction = OpNode->GetTargetFunction())
+            {
+                NodeObject->SetStringField(TEXT("OperatorFunction"), OperatorFunction->GetName());
             }
         }
     }
@@ -458,6 +568,72 @@ TSharedPtr<FJsonObject> UGeoBlueprintJsonFunctionLibrary::ConvertNodeToJsonObjec
                 }
             }
             NodeObject->SetNumberField(TEXT("NumOptions"), NumOptions);
+        }
+    }
+    else if (Node->IsA<UK2Node_MakeArray>())
+    {
+        if (UK2Node_MakeArray* ArrayNode = Cast<UK2Node_MakeArray>(Node))
+        {
+            NodeObject->SetNumberField(TEXT("NumElements"), ArrayNode->NumInputs);
+            // Get array type from output pin
+            for (UEdGraphPin* Pin : ArrayNode->Pins)
+            {
+                if (Pin && Pin->Direction == EGPD_Output)
+                {
+                    NodeObject->SetStringField(TEXT("ArrayType"), Pin->PinType.PinCategory.ToString());
+                    break;
+                }
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_MakeStruct>())
+    {
+        if (UK2Node_MakeStruct* StructNode = Cast<UK2Node_MakeStruct>(Node))
+        {
+            // Get struct type from output pin
+            for (UEdGraphPin* Pin : StructNode->Pins)
+            {
+                if (Pin && Pin->Direction == EGPD_Output)
+                {
+                    if (UScriptStruct* Struct = Cast<UScriptStruct>(Pin->PinType.PinSubCategoryObject.Get()))
+                    {
+                        NodeObject->SetStringField(TEXT("StructType"), Struct->GetName());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_BreakStruct>())
+    {
+        if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+        {
+            // Get struct type from input pin
+            for (UEdGraphPin* Pin : BreakNode->Pins)
+            {
+                if (Pin && Pin->Direction == EGPD_Input)
+                {
+                    if (UScriptStruct* Struct = Cast<UScriptStruct>(Pin->PinType.PinSubCategoryObject.Get()))
+                    {
+                        NodeObject->SetStringField(TEXT("StructType"), Struct->GetName());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    else if (Node->IsA<UK2Node_CallParentFunction>())
+    {
+        if (UK2Node_CallParentFunction* ParentNode = Cast<UK2Node_CallParentFunction>(Node))
+        {
+            if (UFunction* ParentFunction = ParentNode->GetTargetFunction())
+            {
+                NodeObject->SetStringField(TEXT("ParentFunction"), ParentFunction->GetName());
+                if (ParentFunction->GetOwnerClass())
+                {
+                    NodeObject->SetStringField(TEXT("ParentClass"), ParentFunction->GetOwnerClass()->GetName());
+                }
+            }
         }
     }
 
