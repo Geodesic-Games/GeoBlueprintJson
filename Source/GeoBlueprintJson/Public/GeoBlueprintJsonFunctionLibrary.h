@@ -69,7 +69,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Geo|JSON")
     static FString ConvertBlueprintNodeToJson(UEdGraphNode* Node);
 
-    UFUNCTION(BlueprintCallable, Category = "Geo|JSON")
+
     static FString ConvertBlueprintPinToJson(UEdGraphPin* Pin);
 
     UFUNCTION(BlueprintCallable, Category = "Blueprint JSON")
