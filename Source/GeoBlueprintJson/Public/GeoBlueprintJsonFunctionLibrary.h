@@ -72,8 +72,11 @@ public:
 
     static FString ConvertBlueprintPinToJson(UEdGraphPin* Pin);
 
-    UFUNCTION(BlueprintCallable, Category = "Blueprint JSON")
+    UFUNCTION(BlueprintCallable, Category = "Geo|JSON")
     static bool ExportJsonToFile(const FString& JsonString, const FString& FilePath);
+
+	UFUNCTION(BlueprintCallable, Category = "Geo|JSON")
+	static FString ExportAllAvailableNodesAsJson();
 
 private:
     static TSharedPtr<FJsonObject> ConvertNodeToJsonObject(UEdGraphNode* Node);

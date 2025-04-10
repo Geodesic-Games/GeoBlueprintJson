@@ -776,3 +776,156 @@ bool UGeoBlueprintJsonFunctionLibrary::ExportJsonToFile(const FString& JsonStrin
     // Write the JSON string to file
     return FFileHelper::SaveStringToFile(JsonString, *FilePath, FFileHelper::EEncodingOptions::AutoDetect, &IFileManager::Get(), FILEWRITE_None);
 } 
+
+FString UGeoBlueprintJsonFunctionLibrary::ExportAllAvailableNodesAsJson()
+{
+    TArray<TSharedPtr<FJsonValue>> AllNodesArray;
+    
+    // Get all classes that derive from UK2Node
+    TArray<UClass*> K2NodeClasses;
+    GetDerivedClasses(UK2Node::StaticClass(), K2NodeClasses);
+    
+    // Process K2Node classes
+    for (UClass* NodeClass : K2NodeClasses)
+    {
+        if (!NodeClass || NodeClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+            continue;
+            
+        TSharedPtr<FJsonObject> NodeObject = MakeShareable(new FJsonObject);
+        
+        // Basic node information
+        NodeObject->SetStringField(TEXT("node_type"), NodeClass->GetName());
+        NodeObject->SetStringField(TEXT("display_name"), NodeClass->GetDisplayNameText().ToString());
+        NodeObject->SetStringField(TEXT("category"), TEXT("K2Node"));
+        
+        // Get node tooltip
+        FString Tooltip;
+        if (NodeClass->HasMetaData(TEXT("Tooltip")))
+        {
+            Tooltip = NodeClass->GetMetaData(TEXT("Tooltip"));
+        }
+        NodeObject->SetStringField(TEXT("tooltip"), Tooltip);
+        
+        // Get node keywords for search
+        FString Keywords;
+        if (NodeClass->HasMetaData(TEXT("Keywords")))
+        {
+            Keywords = NodeClass->GetMetaData(TEXT("Keywords"));
+        }
+        NodeObject->SetStringField(TEXT("keywords"), Keywords);
+        
+        // Get node category
+        FString Category;
+        if (NodeClass->HasMetaData(TEXT("Category")))
+        {
+            Category = NodeClass->GetMetaData(TEXT("Category"));
+        }
+        NodeObject->SetStringField(TEXT("category_path"), Category);
+        
+        // Get node pins if it's a K2Node
+        if (UK2Node* K2Node = Cast<UK2Node>(NodeClass->GetDefaultObject()))
+        {
+            TArray<TSharedPtr<FJsonValue>> PinsArray;
+            for (UEdGraphPin* Pin : K2Node->Pins)
+            {
+                TSharedPtr<FJsonObject> PinObject = MakeShareable(new FJsonObject);
+                PinObject->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                PinObject->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
+                PinObject->SetStringField(TEXT("type"), Pin->PinType.PinCategory.ToString());
+                PinObject->SetStringField(TEXT("sub_type"), Pin->PinType.PinSubCategory.ToString());
+                PinObject->SetBoolField(TEXT("is_array"), Pin->PinType.IsArray());
+                PinObject->SetBoolField(TEXT("is_reference"), Pin->PinType.bIsReference);
+                
+                PinsArray.Add(MakeShareable(new FJsonValueObject(PinObject)));
+            }
+            NodeObject->SetArrayField(TEXT("pins"), PinsArray);
+        }
+        
+        AllNodesArray.Add(MakeShareable(new FJsonValueObject(NodeObject)));
+    }
+    
+    // Get all available Blueprint function libraries and their functions
+    TArray<UClass*> FunctionLibraryClasses;
+    GetDerivedClasses(UBlueprintFunctionLibrary::StaticClass(), FunctionLibraryClasses);
+    
+    for (UClass* LibraryClass : FunctionLibraryClasses)
+    {
+        if (!LibraryClass || LibraryClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+            continue;
+        
+        // Get all UFUNCTIONs in the class
+        for (TFieldIterator<UFunction> FuncIt(LibraryClass); FuncIt; ++FuncIt)
+        {
+            UFunction* Function = *FuncIt;
+            if (!Function || Function->HasAnyFunctionFlags(FUNC_Private | FUNC_Protected))
+                continue;
+                
+            // Check if the function is marked as BlueprintCallable or BlueprintPure
+            if (!Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure))
+                continue;
+                
+            TSharedPtr<FJsonObject> NodeObject = MakeShareable(new FJsonObject);
+            
+            // Basic node information
+            NodeObject->SetStringField(TEXT("node_type"), TEXT("K2Node_CallFunction"));
+            NodeObject->SetStringField(TEXT("function_name"), Function->GetName());
+            NodeObject->SetStringField(TEXT("class_name"), LibraryClass->GetName());
+            NodeObject->SetStringField(TEXT("display_name"), Function->GetDisplayNameText().ToString());
+            NodeObject->SetStringField(TEXT("category"), TEXT("BlueprintFunction"));
+            
+            // Get function tooltip
+            FString Tooltip;
+            if (Function->HasMetaData(TEXT("Tooltip")))
+            {
+                Tooltip = Function->GetMetaData(TEXT("Tooltip"));
+            }
+            NodeObject->SetStringField(TEXT("tooltip"), Tooltip);
+            
+            // Get function keywords for search
+            FString Keywords;
+            if (Function->HasMetaData(TEXT("Keywords")))
+            {
+                Keywords = Function->GetMetaData(TEXT("Keywords"));
+            }
+            NodeObject->SetStringField(TEXT("keywords"), Keywords);
+            
+            // Get function category
+            FString Category;
+            if (Function->HasMetaData(TEXT("Category")))
+            {
+                Category = Function->GetMetaData(TEXT("Category"));
+            }
+            NodeObject->SetStringField(TEXT("category_path"), Category);
+            
+            // Get function parameters
+            TArray<TSharedPtr<FJsonValue>> ParametersArray;
+            for (TFieldIterator<FProperty> PropIt(Function); PropIt; ++PropIt)
+            {
+                FProperty* Property = *PropIt;
+                if (!Property || !Property->HasAnyPropertyFlags(CPF_Parm))
+                    continue;
+                    
+                TSharedPtr<FJsonObject> ParamObject = MakeShareable(new FJsonObject);
+                ParamObject->SetStringField(TEXT("name"), Property->GetName());
+                ParamObject->SetStringField(TEXT("type"), Property->GetClass()->GetName());
+                ParamObject->SetStringField(TEXT("display_name"), Property->GetDisplayNameText().ToString());
+                ParamObject->SetStringField(TEXT("direction"), Property->HasAnyPropertyFlags(CPF_ReturnParm) ? TEXT("Return") : 
+                    Property->HasAnyPropertyFlags(CPF_OutParm) ? TEXT("Output") : TEXT("Input"));
+                
+                ParametersArray.Add(MakeShareable(new FJsonValueObject(ParamObject)));
+            }
+            NodeObject->SetArrayField(TEXT("parameters"), ParametersArray);
+            
+            AllNodesArray.Add(MakeShareable(new FJsonValueObject(NodeObject)));
+        }
+    }
+    
+    // Convert to JSON string
+    FString ResultJson;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultJson);
+    FJsonSerializer::Serialize(AllNodesArray, Writer);
+    
+    UE_LOG(LogTemp, Log, TEXT("Exported %d available nodes from the engine"), AllNodesArray.Num());
+    return ResultJson;
+}
+
