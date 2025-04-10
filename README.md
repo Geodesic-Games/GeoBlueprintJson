@@ -90,6 +90,9 @@ Export All Available Nodes As Json
 
 ### JSON Output Structure
 
+![image](https://github.com/user-attachments/assets/3d2f9a3f-950e-4197-ab54-d6046dd125e3)
+
+
 The JSON output includes:
 
 ```json
